@@ -15,6 +15,19 @@ Services:
 - Temporal UI: http://localhost:8088
 - MinIO Console: http://localhost:9001
 
+## Temporal Test Endpoints
+
+Use these to verify the worker + workflow end-to-end:
+
+- Start workflow:
+  - `curl -X POST http://localhost:8000/test/portal/run -H 'content-type: application/json' -d '{"flow_id":"test-flow","workflow_id":"wf-test-13","steps":[{"op":"noop"}]}'`
+- Check state:
+  - `curl http://localhost:8000/test/portal/wf-test-13/state`
+- Provide MFA (resume):
+  - `curl -X POST http://localhost:8000/test/portal/wf-test-13/mfa -H 'content-type: application/json' -d '{"code":"123456"}'`
+- Get result:
+  - `curl http://localhost:8000/test/portal/wf-test-13/result`
+
 ## Dev (without Docker)
 
 1. Install Poetry; then `poetry install`

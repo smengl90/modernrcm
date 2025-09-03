@@ -8,7 +8,9 @@ from fastapi import APIRouter, HTTPException
 from ...workflows.client import get_temporal_client
 from ...workflows.portal import PortalFlow
 from ...app.settings import get_settings
+import asyncio
 from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.common import WorkflowIDReusePolicy
 
 
 router = APIRouter(prefix="/test/portal", tags=["test-portal"])
@@ -29,16 +31,18 @@ async def start_portal_flow(body: dict[str, Any] | None = None):
             id=workflow_id,
             task_queue=s.temporal_task_queue,
             args=[flow_id, steps],
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
     except WorkflowAlreadyStartedError:
         handle = client.get_workflow_handle(workflow_id)
 
-    # Query state for waiting_mfa
+    # Best-effort state query (may race with start)
+    state_dict: dict[str, Any] = {}
     try:
         state = await handle.query(PortalFlow.get_state)
         state_dict = asdict(state) if is_dataclass(state) else dict(state)
     except Exception:
-        state_dict = {}
+        pass
 
     return {"workflow_id": handle.id, "state": state_dict}
 
@@ -61,6 +65,31 @@ async def provide_mfa(workflow_id: str, body: dict[str, Any]):
         raise HTTPException(status_code=422, detail="Missing 'code'")
     client = await get_temporal_client()
     handle = client.get_workflow_handle(workflow_id)
-    await handle.signal(PortalFlow.provide_mfa, str(code))
-    result = await handle.result()
-    return {"result": result}
+    try:
+        await handle.signal(PortalFlow.provide_mfa, str(code))
+    except Exception as e:
+        raise HTTPException(status_code=409, detail=f"Signal failed: {type(e).__name__}: {e}")
+
+    # Try to await result briefly; if not done, return 202
+    try:
+        result = await asyncio.wait_for(handle.result(), timeout=10)
+        return {"result": result}
+    except asyncio.TimeoutError:
+        return {"status": "signal_sent", "message": "Workflow still running; check state later"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Workflow error: {type(e).__name__}: {e}")
+
+
+@router.get("/{workflow_id}/result")
+async def get_result(workflow_id: str):
+    client = await get_temporal_client()
+    handle = client.get_workflow_handle(workflow_id)
+    try:
+        result = await asyncio.wait_for(handle.result(), timeout=1)
+        return {"status": "completed", "result": result}
+    except asyncio.TimeoutError:
+        return {"status": "running"}
+    except Exception as e:
+        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+    except asyncio.TimeoutError:
+        return {"status": "signal_sent", "message": "Workflow still running; check state later"}

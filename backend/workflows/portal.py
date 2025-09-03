@@ -31,17 +31,16 @@ class PortalFlow:
 
     @workflow.run
     async def run(self, flow_id: str, steps: list[dict]) -> dict:
+        # Enter waiting state first (reduces race for queries)
+        self.state.waiting_mfa = True
         # Emit a breakpoint requiring MFA
         await workflow.execute_activity(
             "emit_event",
             {"type": "breakpoint.mfa.requested", "payload": {"flow_id": flow_id}},
             start_to_close_timeout=timedelta(seconds=30),
         )
-        self.state.waiting_mfa = True
-        # Wait up to 5 minutes for MFA
-        ok = await workflow.wait_condition(lambda: not self.state.waiting_mfa, timeout=timedelta(seconds=300))
-        if not ok:
-            raise RuntimeError("MFA not provided in time")
+        # Wait for MFA signal indefinitely (test endpoint convenience)
+        await workflow.wait_condition(lambda: not self.state.waiting_mfa)
         # Execute stubbed steps (real execution will be in activities)
         # Return deterministic mock for now
         self.state.output = {"flow_id": flow_id, "steps": len(steps), "status": "ok"}
