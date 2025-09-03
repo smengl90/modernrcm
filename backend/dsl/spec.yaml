@@ -1,0 +1,19 @@
+version: 1
+ops:
+  - name: navigate
+    params: [url]
+  - name: input
+    params: [selector, value]
+  - name: click
+    params: [selector]
+  - name: wait
+    params: [selector, state, timeout_ms]
+  - name: extract
+    params: [mappings]
+  - name: assert
+    params: [selector, contains]
+  - name: emit
+    params: [schema, map]
+  - name: breakpoint
+    params: [reason]
+
